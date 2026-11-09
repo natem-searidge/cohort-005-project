@@ -61,6 +61,27 @@ function buy(input: { amountPaid?: number; daysAgo?: number } = {}) {
     .get();
 }
 
+function buyTeamSeats(input: {
+  amountPaid: number;
+  daysAgo: number;
+  claimed: boolean;
+}) {
+  const purchase = buy(input);
+  const team = testDb.insert(schema.teams).values({}).returning().get();
+  testDb
+    .insert(schema.coupons)
+    .values({
+      teamId: team.id,
+      courseId: base.course.id,
+      code: `SEAT-${purchase.id}`,
+      purchaseId: purchase.id,
+      redeemedByUserId: input.claimed ? base.user.id : null,
+      redeemedAt: input.claimed ? NOW.toISOString() : null,
+    })
+    .run();
+  return purchase;
+}
+
 function complete(count: number) {
   for (const lessonId of lessonIds.slice(0, count)) {
     testDb
@@ -134,24 +155,18 @@ describe("checkRefundable", () => {
     expect(check()).toMatchObject({ refundable: false, status: 403 });
   });
 
-  it("is not refundable for a claimed team seat", () => {
-    const purchase = buy();
-    const team = testDb
-      .insert(schema.teams)
-      .values({})
-      .returning()
-      .get();
-    testDb
-      .insert(schema.coupons)
-      .values({
-        teamId: team.id,
-        courseId: base.course.id,
-        code: "SEAT-1",
-        purchaseId: purchase.id,
-        redeemedByUserId: base.user.id,
-        redeemedAt: NOW.toISOString(),
-      })
-      .run();
+  it("refunds the personal purchase when a team purchase came later", () => {
+    const personal = buy({ amountPaid: 4900, daysAgo: 3 });
+    buyTeamSeats({ amountPaid: 5 * 4900, daysAgo: 1, claimed: true });
+    expect(check()).toMatchObject({
+      refundable: true,
+      amount: 4900,
+      purchase: { id: personal.id },
+    });
+  });
+
+  it("is not refundable when the only purchase is a team purchase", () => {
+    buyTeamSeats({ amountPaid: 5 * 4900, daysAgo: 1, claimed: false });
     expect(check()).toMatchObject({ refundable: false, status: 403 });
   });
 

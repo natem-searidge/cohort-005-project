@@ -1,4 +1,4 @@
-import { and, eq, inArray, isNotNull, sql } from "drizzle-orm";
+import { and, eq, inArray, notExists, sql } from "drizzle-orm";
 import { db } from "~/db";
 import {
   coupons,
@@ -27,11 +27,25 @@ export type RefundEligibility =
     }
   | { refundable: false; reason: string; status: 403 | 409 };
 
-function getLatestPurchase(userId: number, courseId: number) {
+// A team purchase buys seats for other people and always has coupons; a
+// personal purchase is the one that gave the learner access and has none.
+// After an approved Refund a learner may buy again, so take the latest.
+function getPersonalPurchase(userId: number, courseId: number) {
   return db
     .select()
     .from(purchases)
-    .where(and(eq(purchases.userId, userId), eq(purchases.courseId, courseId)))
+    .where(
+      and(
+        eq(purchases.userId, userId),
+        eq(purchases.courseId, courseId),
+        notExists(
+          db
+            .select({ id: coupons.id })
+            .from(coupons)
+            .where(eq(coupons.purchaseId, purchases.id))
+        )
+      )
+    )
     .orderBy(sql`${purchases.createdAt} desc`)
     .get();
 }
@@ -42,20 +56,6 @@ function hasHadRefund(purchaseId: number) {
       .select({ id: refunds.id })
       .from(refunds)
       .where(eq(refunds.purchaseId, purchaseId))
-      .get()
-  );
-}
-
-// A seat that came out of a team licence, and has been claimed, belongs to
-// the team — the learner cannot hand it back on their own.
-function isClaimedTeamSeat(purchaseId: number) {
-  return Boolean(
-    db
-      .select({ id: coupons.id })
-      .from(coupons)
-      .where(
-        and(eq(coupons.purchaseId, purchaseId), isNotNull(coupons.redeemedAt))
-      )
       .get()
   );
 }
@@ -117,7 +117,7 @@ function asDayString(when: Date) {
 }
 
 /**
- * Whether the learner's latest purchase of a course is Refundable — see
+ * Whether the learner's personal purchase of a course is Refundable — see
  * GLOSSARY.md. The course page uses this to offer a Refund and the refund
  * route uses it to accept one, so the two can never disagree.
  */
@@ -126,7 +126,7 @@ export function checkRefundable(
   courseId: number,
   now: Date = new Date()
 ): RefundEligibility {
-  const purchase = getLatestPurchase(userId, courseId);
+  const purchase = getPersonalPurchase(userId, courseId);
 
   if (!purchase) {
     return {
@@ -141,14 +141,6 @@ export function checkRefundable(
       refundable: false,
       reason: "This purchase has already had a Refund.",
       status: 409,
-    };
-  }
-
-  if (isClaimedTeamSeat(purchase.id)) {
-    return {
-      refundable: false,
-      reason: "A claimed team seat cannot be refunded.",
-      status: 403,
     };
   }
 
