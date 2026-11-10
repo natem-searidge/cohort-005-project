@@ -2,7 +2,7 @@ import { Link } from "react-router";
 import type { Route } from "./+types/instructor.$courseId.students";
 import { getCurrentUserId } from "~/lib/session";
 import { UserRole } from "~/db/schema";
-import { isLapsed } from "~/lib/enrollments";
+import { isUnenrolled } from "~/lib/enrollments";
 import { Card, CardContent } from "~/components/ui/card";
 import { Button } from "~/components/ui/button";
 import { AlertTriangle, ArrowLeft, Users, Award } from "lucide-react";
@@ -43,9 +43,9 @@ function getCourseEnrolledStudents(courseId: number) {
     .all();
 }
 
-// Learners whose place was taken away keep their progress, so they still show
+// Students whose Enrollment has ended keep their progress, so they still show
 // on the roster. They have no Enrollment, so their purchase date stands in.
-function getCourseLapsedStudents(courseId: number, enrolledUserIds: number[]) {
+function getCourseUnenrolledStudents(courseId: number, enrolledUserIds: number[]) {
   const lessonIds = getCourseLessonIds(courseId);
   if (lessonIds.length === 0) return [];
 
@@ -230,7 +230,7 @@ export async function loader({ params, request }: Route.LoaderArgs) {
     completedAt: string | null;
   }[] = getCourseEnrolledStudents(courseId);
   enrolledStudents.push(
-    ...getCourseLapsedStudents(
+    ...getCourseUnenrolledStudents(
       courseId,
       enrolledStudents.map((s) => s.userId)
     )
@@ -296,7 +296,7 @@ export async function loader({ params, request }: Route.LoaderArgs) {
       email: studentUser?.email ?? "",
       enrolledAt: enrollment.enrolledAt,
       completedAt: enrollment.completedAt,
-      lapsed: isLapsed(enrollment),
+      unenrolled: isUnenrolled(enrollment),
       progress,
       quizScores,
     };
@@ -457,9 +457,9 @@ export default function InstructorStudentRoster({
                           {progressBar(student.progress)}
                         </td>
                         <td className="px-4 py-3">
-                          {student.lapsed ? (
+                          {student.unenrolled ? (
                             <span className="inline-flex items-center rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-medium text-amber-800 dark:bg-amber-900/30 dark:text-amber-400">
-                              Lapsed
+                              Unenrolled
                             </span>
                           ) : student.completedAt ? (
                             <span className="inline-flex items-center rounded-full bg-green-100 px-2.5 py-0.5 text-xs font-medium text-green-800 dark:bg-green-900/30 dark:text-green-400">
